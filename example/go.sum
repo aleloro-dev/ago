@@ -1,2 +1,4 @@
+github.com/aleloro-dev/ago v0.0.0-20260705222832-94e9ce59aff8 h1:Thxbodqu3uKb2VtCnopHtVMk05duLztXHhgUjXbOgKQ=
+github.com/aleloro-dev/ago v0.0.0-20260705222832-94e9ce59aff8/go.mod h1:FYRliqacK3SN698KAD9lAJ604VV9Zi7m3tj/Xx5ipKI=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
