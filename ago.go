@@ -57,7 +57,8 @@ type Event struct {
 	Err        error
 }
 
-// Interface to implement observability hooks
+// Observer receives agent events for monitoring and tracing.
+// OnEvent may be called concurrently — implementations must be safe for concurrent use.
 type Observer interface {
 	OnEvent(e Event)
 }
@@ -131,6 +132,15 @@ func (a *Agent) NewSession() *Session {
 	return &Session{ID: newID(ResourceSession), agent: a}
 }
 
+// ResumeSession restores a previous session from the agent's Store.
+// Returns an error if no Store is configured or the session cannot be loaded.
+func (a *Agent) ResumeSession(id ResourceID) (*Session, error) {
+	if a.Store == nil {
+		return nil, fmt.Errorf("no store configured")
+	}
+	return a.Store.Load(id)
+}
+
 func (s *Session) Send(ctx context.Context, task string) (string, error) {
 	a := s.agent
 	maxIter := a.MaxIter
@@ -164,6 +174,13 @@ func (s *Session) Send(ctx context.Context, task string) (string, error) {
 			wg.Add(1)
 			go func(i int, tc ToolCall) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						err := fmt.Errorf("tool panicked: %v", r)
+						a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Err: err})
+						results[i] = fmt.Sprintf("error: %v", err)
+					}
+				}()
 				t := time.Now()
 				result, err := a.executeTool(ctx, tc)
 				a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, DurationMs: time.Since(t).Milliseconds(), Err: err})
