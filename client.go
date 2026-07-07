@@ -1,6 +1,7 @@
 package ago
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -38,14 +39,14 @@ func NewClient(provider Provider, apiKey, model string) *Client {
 	}
 }
 
-func (c *Client) Call(system string, history []Message, tools []Tool) (Message, error) {
+func (c *Client) Call(ctx context.Context, system string, history []Message, tools []Tool) (Message, error) {
 	if c.Provider == Anthropic {
-		return c.callAnthropic(system, history, tools)
+		return c.callAnthropic(ctx, system, history, tools)
 	}
-	return c.callOpenAI(system, history, tools)
+	return c.callOpenAI(ctx, system, history, tools)
 }
 
-func (c *Client) callOpenAI(system string, history []Message, tools []Tool) (Message, error) {
+func (c *Client) callOpenAI(ctx context.Context, system string, history []Message, tools []Tool) (Message, error) {
 	msgs := make([]oaiMsg, 0, len(history)+1)
 	if system != "" {
 		msgs = append(msgs, oaiMsg{Role: "system", Content: system})
@@ -58,8 +59,8 @@ func (c *Client) callOpenAI(system string, history []Message, tools []Tool) (Mes
 			msg := oaiMsg{Role: "assistant", Content: m.Content}
 			for _, tc := range m.ToolCalls {
 				msg.ToolCalls = append(msg.ToolCalls, oaiToolCall{
-					ID:   tc.ID,
-					Type: "function",
+					ID:       tc.ID,
+					Type:     "function",
 					Function: oaiFn{Name: tc.Name, Arguments: string(tc.Input)},
 				})
 			}
@@ -81,8 +82,12 @@ func (c *Client) callOpenAI(system string, history []Message, tools []Tool) (Mes
 		}
 	}
 
-	body, _ := json.Marshal(oaiRequest{Model: c.Model, Messages: msgs, Tools: oaiTools})
-	data, err := httpPost(c.BaseURL+"/chat/completions", map[string]string{
+	maxTokens := c.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = defaultMaxTokens
+	}
+	body, _ := json.Marshal(oaiRequest{Model: c.Model, MaxTokens: maxTokens, Messages: msgs, Tools: oaiTools})
+	data, err := httpPost(ctx, c.BaseURL+"/chat/completions", map[string]string{
 		"Authorization": "Bearer " + c.APIKey,
 	}, body)
 	if err != nil {
@@ -101,7 +106,10 @@ func (c *Client) callOpenAI(system string, history []Message, tools []Tool) (Mes
 	}
 
 	choice := resp.Choices[0].Message
-	msg := Message{Role: RoleAssistant}
+	msg := Message{
+		Role:  RoleAssistant,
+		Usage: TokenUsage{InputTokens: resp.Usage.PromptTokens, OutputTokens: resp.Usage.CompletionTokens},
+	}
 	if choice.Content != nil {
 		msg.Content = *choice.Content
 	}
@@ -115,10 +123,13 @@ func (c *Client) callOpenAI(system string, history []Message, tools []Tool) (Mes
 	return msg, nil
 }
 
+const defaultMaxTokens = 4096
+
 type oaiRequest struct {
-	Model    string    `json:"model"`
-	Messages []oaiMsg  `json:"messages"`
-	Tools    []oaiTool `json:"tools,omitempty"`
+	Model     string    `json:"model"`
+	MaxTokens int       `json:"max_tokens"`
+	Messages  []oaiMsg  `json:"messages"`
+	Tools     []oaiTool `json:"tools,omitempty"`
 }
 
 type oaiMsg struct {
@@ -157,14 +168,19 @@ type oaiResponse struct {
 			ToolCalls []oaiToolCall `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
-func (c *Client) callAnthropic(system string, history []Message, tools []Tool) (Message, error) {
+func (c *Client) callAnthropic(ctx context.Context, system string, history []Message, tools []Tool) (Message, error) {
 	msgs := make([]antMsg, 0, len(history))
-	for _, m := range history {
+	for i := 0; i < len(history); i++ {
+		m := history[i]
 		switch m.Role {
 		case RoleUser:
 			msgs = append(msgs, antMsg{Role: "user", Content: m.Content})
@@ -178,10 +194,13 @@ func (c *Client) callAnthropic(system string, history []Message, tools []Tool) (
 			}
 			msgs = append(msgs, antMsg{Role: "assistant", Content: blocks})
 		case RoleToolResult:
-			msgs = append(msgs, antMsg{
-				Role:    "user",
-				Content: []antBlock{{Type: "tool_result", ToolUseID: m.ToolCallID, Content: m.Content}},
-			})
+			var blocks []antBlock
+			for i < len(history) && history[i].Role == RoleToolResult {
+				blocks = append(blocks, antBlock{Type: "tool_result", ToolUseID: history[i].ToolCallID, Content: history[i].Content})
+				i++
+			}
+			i--
+			msgs = append(msgs, antMsg{Role: "user", Content: blocks})
 		}
 	}
 
@@ -192,7 +211,7 @@ func (c *Client) callAnthropic(system string, history []Message, tools []Tool) (
 
 	maxTokens := c.MaxTokens
 	if maxTokens == 0 {
-		maxTokens = 4096
+		maxTokens = defaultMaxTokens
 	}
 	body, _ := json.Marshal(antRequest{
 		Model:     c.Model,
@@ -201,7 +220,7 @@ func (c *Client) callAnthropic(system string, history []Message, tools []Tool) (
 		Messages:  msgs,
 		Tools:     antTools,
 	})
-	data, err := httpPost(c.BaseURL+"/messages", map[string]string{
+	data, err := httpPost(ctx, c.BaseURL+"/messages", map[string]string{
 		"x-api-key":         c.APIKey,
 		"anthropic-version": "2023-06-01",
 	}, body)
@@ -217,7 +236,10 @@ func (c *Client) callAnthropic(system string, history []Message, tools []Tool) (
 		return Message{}, fmt.Errorf("%s", resp.Error.Message)
 	}
 
-	msg := Message{Role: RoleAssistant}
+	msg := Message{
+		Role:  RoleAssistant,
+		Usage: TokenUsage{InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens},
+	}
 	for _, block := range resp.Content {
 		switch block.Type {
 		case "text":
@@ -260,7 +282,11 @@ type antTool struct {
 
 type antResponse struct {
 	Content []antBlock `json:"content"`
-	Error   *struct {
+	Usage   struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
