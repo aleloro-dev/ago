@@ -52,6 +52,7 @@ type Event struct {
 	AgentName  string
 	Task       string
 	Tool       string
+	Input      json.RawMessage
 	DurationMs int64
 	Usage      TokenUsage
 	Err        error
@@ -177,13 +178,13 @@ func (s *Session) Send(ctx context.Context, task string) (string, error) {
 				defer func() {
 					if r := recover(); r != nil {
 						err := fmt.Errorf("tool panicked: %v", r)
-						a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Err: err})
+						a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: tc.Input, Err: err})
 						results[i] = fmt.Sprintf("error: %v", err)
 					}
 				}()
 				t := time.Now()
 				result, err := a.executeTool(ctx, tc)
-				a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, DurationMs: time.Since(t).Milliseconds(), Err: err})
+				a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: tc.Input, DurationMs: time.Since(t).Milliseconds(), Err: err})
 				if err != nil {
 					results[i] = fmt.Sprintf("error: %v", err)
 				} else {
