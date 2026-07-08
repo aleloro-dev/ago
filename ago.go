@@ -74,7 +74,7 @@ func (o *slogObserver) OnEvent(e Event) {
 	case EventModelCall:
 		slog.Info("[model:call]", "session", e.SessionID, "duration_ms", e.DurationMs, "input_tokens", e.Usage.InputTokens, "output_tokens", e.Usage.OutputTokens)
 	case EventToolCall:
-		slog.Info("[tool:call]", "session", e.SessionID, "tool", e.Tool, "input", e.Input, "duration_ms", e.DurationMs, "error", e.Err)
+		slog.Info("[tool:call]", "session", e.SessionID, "tool", e.Tool, "input", string(*e.Input), "duration_ms", e.DurationMs, "error", e.Err)
 	}
 }
 
