@@ -52,7 +52,7 @@ type Event struct {
 	AgentName  string
 	Task       string
 	Tool       string
-	Input      json.RawMessage
+	Input      *json.RawMessage
 	DurationMs int64
 	Usage      TokenUsage
 	Err        error
@@ -74,7 +74,7 @@ func (o *slogObserver) OnEvent(e Event) {
 	case EventModelCall:
 		slog.Info("[model:call]", "session", e.SessionID, "duration_ms", e.DurationMs, "input_tokens", e.Usage.InputTokens, "output_tokens", e.Usage.OutputTokens)
 	case EventToolCall:
-		slog.Info("[tool:call]", "session", e.SessionID, "tool", e.Tool, "duration_ms", e.DurationMs, "error", e.Err)
+		slog.Info("[tool:call]", "session", e.SessionID, "tool", e.Tool, "input", e.Input, "duration_ms", e.DurationMs, "error", e.Err)
 	}
 }
 
@@ -178,13 +178,13 @@ func (s *Session) Send(ctx context.Context, task string) (string, error) {
 				defer func() {
 					if r := recover(); r != nil {
 						err := fmt.Errorf("tool panicked: %v", r)
-						a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: tc.Input, Err: err})
+						a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: &tc.Input, Err: err})
 						results[i] = fmt.Sprintf("error: %v", err)
 					}
 				}()
 				t := time.Now()
 				result, err := a.executeTool(ctx, tc)
-				a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: tc.Input, DurationMs: time.Since(t).Milliseconds(), Err: err})
+				a.Observer.OnEvent(Event{ID: newID(ResourceEvent), Type: EventToolCall, SessionID: s.ID, AgentName: a.Name, Tool: tc.Name, Input: &tc.Input, DurationMs: time.Since(t).Milliseconds(), Err: err})
 				if err != nil {
 					results[i] = fmt.Sprintf("error: %v", err)
 				} else {
