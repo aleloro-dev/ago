@@ -139,7 +139,12 @@ func (a *Agent) ResumeSession(id ResourceID) (*Session, error) {
 	if a.Store == nil {
 		return nil, fmt.Errorf("no store configured")
 	}
-	return a.Store.Load(id)
+	s, err := a.Store.Load(id)
+	if err != nil {
+		return nil, err
+	}
+	s.agent = a
+	return s, nil
 }
 
 func (s *Session) Send(ctx context.Context, task string) (string, error) {
